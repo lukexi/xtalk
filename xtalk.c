@@ -3,26 +3,66 @@
 #include <GL/glew.h>
 #include <stdbool.h>
 #include <X11/extensions/Xrandr.h>
+#include "edid.h"
 
-void GetEDID(Display* XDisplay) {
+drm_edid* GetEDIDX11(Display* XDisplay, Window XWindow) {
 
-    Screen* XScreen = ScreenOfDisplay(XDisplay, 0);
-
-    RROutput XOutput = X11_XRRGetOutputPrimary(
-        XDisplay, RootWindow(XDisplay, XScreen));
-
-    Atom EDIDProperty = XInternAtom(
-        XDisplay,
-        RR_PROPERTY_RANDR_EDID,
-        false);
-    int PropsCount;
-    Atom *Props = X11_XRRListOutputProperties(XDisplay, XOutput, &PropsCount);
-
-    for (int PropIndex = 0; PropIndex < PropsCount; PropIndex++) {
-        if (Props[PropIndex] == EDIDProperty) {
-            printf("Found EDID prop\n");
+    int XScreen = DefaultScreen(XDisplay);
+    XRRScreenResources* XScreenRes = XRRGetScreenResourcesCurrent(XDisplay, RootWindow(XDisplay, XScreen));
+    if (!XScreenRes || XScreenRes->noutput == 0) {
+        if (XScreenRes) {
+            XRRFreeScreenResources(XScreenRes);
+        }
+        XScreenRes = XRRGetScreenResources(XDisplay,
+            RootWindow(XDisplay, XScreen));
+        if (!XScreenRes) {
+            printf("Couldn't get screen resources\n");
+            return NULL;
         }
     }
+    RROutput XOutput = XRRGetOutputPrimary(XDisplay,
+            RootWindow(XDisplay, XScreen));
+
+    drm_edid* EDID = NULL;
+    for (int OutputIndex = 0; OutputIndex < XScreenRes->noutput; OutputIndex++) {
+        RROutput XOutput = XScreenRes->outputs[OutputIndex];
+
+        Atom EDIDProperty = XInternAtom(
+            XDisplay,
+            RR_PROPERTY_RANDR_EDID,
+            false);
+        int PropsCount;
+        Atom *Props = XRRListOutputProperties(XDisplay, XOutput, &PropsCount);
+        for (int PropIndex = 0; PropIndex < PropsCount; PropIndex++) {
+            if (Props[PropIndex] == EDIDProperty) {
+                unsigned char *PropData;
+                int ActualFormat;
+                unsigned long NumItems, BytesAfter;
+                Atom ActualType;
+                if (XRRGetOutputProperty(XDisplay, XOutput, EDIDProperty,
+                    0, 256, False, False, AnyPropertyType,
+                    &ActualType, &ActualFormat, &NumItems,
+                    &BytesAfter, &PropData) == Success) {
+                    EDID = calloc(1, sizeof(drm_edid));
+                    edid_parse(EDID, PropData, 256);
+                    break;
+                }
+            }
+        }
+        XFree(Props);
+    }
+    return EDID;
+}
+
+drm_edid* GetWindowDisplayEDID(SDL_Window* SDLWindow) {
+    SDL_SysWMinfo WMInfo;
+    SDL_VERSION(&WMInfo.version);
+    SDL_GetWindowWMInfo(SDLWindow, &WMInfo);
+
+    Display* XDisplay = WMInfo.info.x11.display;
+    Window XWindow = WMInfo.info.x11.window;
+
+    return GetEDIDX11(XDisplay, XWindow);
 }
 
 int main(int argc, char const *argv[]) {
@@ -41,23 +81,22 @@ int main(int argc, char const *argv[]) {
             SDL_WINDOW_OPENGL | SDL_WINDOW_FULLSCREEN);
         SDL_GL_SetSwapInterval(0);
 
+        printf("Got a display with bounds %ix%i %ix%i\n",
+            DisplayBounds.x, DisplayBounds.y,
+            DisplayBounds.w, DisplayBounds.h);
+
         Windows[DisplayIndex] = Window;
+
+        drm_edid* EDID = GetWindowDisplayEDID(Window);
+        printf("Found monitor %s %s %s %s\n",
+                        EDID->MonitorName,
+                        EDID->SerialNumber,
+                        EDID->EISAID,
+                        EDID->PNPID);
     }
     SDL_GLContext GLContext = SDL_GL_CreateContext(Windows[0]);
 
     FILE* LogFile  = fopen("xtalk.log", "w");
-
-
-    for (int DisplayIndex = 0; DisplayIndex < NumDisplays; DisplayIndex++) {
-        SDL_SysWMinfo WMInfo;
-        SDL_VERSION(&WMInfo.version);
-        SDL_GetWindowWMInfo(Windows[DisplayIndex], &WMInfo);
-
-        Display* Display = WMInfo.info.x11.display;
-        printf("Got a display\n");
-    }
-
-
 
     unsigned int LastFrame = SDL_GetTicks();
     while (1) {
