@@ -5,6 +5,10 @@
 #include <X11/extensions/Xrandr.h>
 #include "edid.h"
 
+// Fills EDIDs with NumDisplays EDIDs.
+// The XWindow argument seems to be spurious here,
+// since I can't get X to tell me the actual XRROutput
+// for a given window (see comment on GetEDIDs)
 void GetEDIDsX11(Display* XDisplay, Window XWindow,
     int NumDisplays, drm_edid** EDIDs) {
 
@@ -12,9 +16,6 @@ void GetEDIDsX11(Display* XDisplay, Window XWindow,
             XDisplay,
             RR_PROPERTY_RANDR_EDID,
             false);
-
-    XWindowAttributes Attrs;
-    XGetWindowAttributes(XDisplay, XWindow, &Attrs);
 
     int XScreen = DefaultScreen(XDisplay);
 
@@ -77,6 +78,9 @@ void GetEDIDsX11(Display* XDisplay, Window XWindow,
     XRRFreeScreenResources(XScreenRes);
 }
 
+// The Display* is the connection to X11 (not a reference to a monitor)
+// I can't find a way to get the XRROutput from a X11 Window,
+// so I'm just lining SDL_Windows and EDIDs positionally.
 drm_edid** GetEDIDs(SDL_Window* SDLWindow, int NumDisplays) {
     SDL_SysWMinfo WMInfo;
     SDL_VERSION(&WMInfo.version);
@@ -84,6 +88,11 @@ drm_edid** GetEDIDs(SDL_Window* SDLWindow, int NumDisplays) {
 
     Display* XDisplay = WMInfo.info.x11.display;
     Window XWindow = WMInfo.info.x11.window;
+
+    // This always gives the same screen even for windows on different monitors.
+    // XWindowAttributes Attrs;
+    // XGetWindowAttributes(XDisplay, XWindow, &Attrs);
+    // printf("Screen for window %lu: %p\n", XWindow, Attrs.screen);
 
     drm_edid** EDIDs = calloc(NumDisplays, sizeof(drm_edid*));
     GetEDIDsX11(XDisplay, XWindow, NumDisplays, EDIDs);
@@ -113,6 +122,8 @@ int main(int argc, char const *argv[]) {
         Windows[DisplayIndex] = Window;
     }
 
+    // Just uses a Window to get an X11 Display pointer;
+    // returns EDIDs for all connected displays.
     drm_edid** EDIDs = GetEDIDs(Windows[0], NumDisplays);
     for (int DisplayIndex = 0; DisplayIndex < NumDisplays; DisplayIndex++) {
         drm_edid* EDID = EDIDs[DisplayIndex];
