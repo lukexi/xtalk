@@ -24,7 +24,11 @@ int main(int argc, char const *argv[]) {
     FILE* LogFile  = fopen("xtalk.log", "w");
 
     unsigned int LastFrame = SDL_GetTicks();
+    SDL_Event Event;
     while (1) {
+        while (SDL_PollEvent(&Event)) {
+            if (Event.type == SDL_QUIT) exit(0);
+        }
         for (int DisplayIndex = 0; DisplayIndex < NumDisplays; DisplayIndex++) {
             // SDL_GLContext GLContext = Contexts[0];
             SDL_Window* Window = Windows[DisplayIndex];
@@ -41,6 +45,7 @@ int main(int argc, char const *argv[]) {
         unsigned int MillisPassed = Now - LastFrame;
         fprintf(LogFile, "Frame time %i\n", MillisPassed);
         LastFrame = Now;
+
     }
 
     return 0;
